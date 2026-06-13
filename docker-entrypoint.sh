@@ -9,7 +9,17 @@ mkdir -p "${ORACLE_HOME_DIR}"
 SELENIUM_PID=$!
 
 # Build oracle serve command
-ORACLE_SERVE_CMD=(oracle serve --host "${ORACLE_SERVE_HOST}")
+ORACLE_SERVE_CMD=(
+    oracle
+    serve
+    --host "${ORACLE_SERVE_HOST}"
+    --port "${ORACLE_SERVE_PORT}"
+)
+
+if [ "${ORACLE_BROWSER_MANUAL_LOGIN:-1}" = "1" ] || [ "${ORACLE_BROWSER_MANUAL_LOGIN:-}" = "true" ]; then
+    ORACLE_SERVE_CMD+=(--browser-manual-login)
+fi
+
 if [ -n "${ORACLE_SERVE_TOKEN}" ]; then
     ORACLE_SERVE_CMD+=(--token "${ORACLE_SERVE_TOKEN}")
 fi
@@ -17,7 +27,7 @@ fi
 ORACLE_PID=""
 
 start_oracle() {
-    echo "Starting oracle serve on ${ORACLE_SERVE_HOST}..."
+    echo "Starting oracle serve on ${ORACLE_SERVE_HOST}:${ORACLE_SERVE_PORT}..."
     "${ORACLE_SERVE_CMD[@]}" &
     ORACLE_PID=$!
 }

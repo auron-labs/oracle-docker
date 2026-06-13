@@ -112,10 +112,12 @@ Healthy first-run behavior looks like this:
 | Variable | Default | Description |
 |---|---|---|
 | `ORACLE_HOME_DIR` | `/home/seluser/.oracle` | Oracle config, sessions, and browser state |
-| `ORACLE_SERVE_HOST` | `0.0.0.0:9473` | Bind address for `oracle serve` |
+| `ORACLE_SERVE_HOST` | `0.0.0.0` | Bind host for `oracle serve` |
+| `ORACLE_SERVE_PORT` | `9473` | Bind port for `oracle serve` |
 | `ORACLE_SERVE_TOKEN` | empty | Optional token required by remote clients |
 | `ORACLE_SERVE_RETRY_DELAY` | `5` | Seconds to wait before retrying `oracle serve` after exit |
 | `ORACLE_ENGINE` | `browser` | Default Oracle engine inside the container |
+| `ORACLE_BROWSER_MANUAL_LOGIN` | `1` | Use Oracle's persistent manual-login browser profile instead of cookie copy |
 | `ORACLE_BROWSER_CHROME_PATH` | `/usr/bin/google-chrome` | Chrome path used by Oracle |
 | `SE_NODE_MAX_SESSIONS` | `3` | Maximum concurrent Selenium sessions |
 | `SE_NODE_SESSION_TIMEOUT` | `300` | Selenium session timeout in seconds |
