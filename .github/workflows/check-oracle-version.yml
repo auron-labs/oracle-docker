@@ -1,0 +1,59 @@
+name: Check Oracle Version
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+      actions: write
+
+    steps:
+      - name: Get latest npm version
+        id: npm
+        run: |
+          LATEST=$(npm view @steipete/oracle version 2>/dev/null)
+          echo "version=${LATEST}" >> "$GITHUB_OUTPUT"
+          echo "Latest npm version: ${LATEST}"
+
+      - name: Check GHCR for existing tag
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.npm.outputs.version }}"
+          echo "Checking for tag ${VERSION} in GHCR..."
+
+          # List tags for the image via the GitHub API
+          TAGS=$(curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/orgs/auron-labs/packages/container/oracle-docker/versions?per_page=100" \
+            | jq -r '.[].metadata.container.tags[]?' 2>/dev/null || echo "")
+
+          if echo "${TAGS}" | grep -qx "${VERSION}"; then
+            echo "Tag ${VERSION} already exists. Skipping build."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Tag ${VERSION} not found. Triggering build."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Dispatch build workflow
+        if: steps.check.outputs.skip == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'build-image.yml',
+              ref: 'main',
+              inputs: {
+                oracle_version: '${{ steps.npm.outputs.version }}'
+              }
+            });
+            console.log('Dispatched build-image.yml with version ${{ steps.npm.outputs.version }}');
