@@ -1,70 +1,74 @@
 #!/bin/bash
 set -euo pipefail
 
-# Ensure ORACLE_HOME_DIR exists
 mkdir -p "${ORACLE_HOME_DIR}"
 
-# Start the base Selenium/Chrome/VNC stack via the original entrypoint
-/opt/bin/entry_point.sh &
-SELENIUM_PID=$!
-
-# Build oracle serve command
-ORACLE_SERVE_CMD=(
-    oracle
-    serve
-    --host "${ORACLE_SERVE_HOST}"
-    --port "${ORACLE_SERVE_PORT}"
-)
-
-if [ "${ORACLE_BROWSER_MANUAL_LOGIN:-1}" = "1" ] || [ "${ORACLE_BROWSER_MANUAL_LOGIN:-}" = "true" ]; then
-    ORACLE_SERVE_CMD+=(--browser-manual-login)
-fi
-
-if [ -n "${ORACLE_SERVE_TOKEN}" ]; then
-    ORACLE_SERVE_CMD+=(--token "${ORACLE_SERVE_TOKEN}")
-fi
-
+XVFB_PID=""
+X11VNC_PID=""
+WEBSOCKIFY_PID=""
 ORACLE_PID=""
 
-start_oracle() {
-    echo "Starting oracle serve on ${ORACLE_SERVE_HOST}:${ORACLE_SERVE_PORT}..."
-    "${ORACLE_SERVE_CMD[@]}" &
-    ORACLE_PID=$!
-}
-
-# Trap signals and forward to both processes
 cleanup() {
     echo "Shutting down..."
-    if [ -n "${ORACLE_PID}" ]; then
-        kill -TERM "$ORACLE_PID" 2>/dev/null || true
-        wait "$ORACLE_PID" 2>/dev/null || true
-    fi
-    kill -TERM "$SELENIUM_PID" 2>/dev/null || true
-    wait "$SELENIUM_PID" 2>/dev/null || true
+    for pid in "$ORACLE_PID" "$WEBSOCKIFY_PID" "$X11VNC_PID" "$XVFB_PID"; do
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            kill -TERM "$pid" 2>/dev/null || true
+        fi
+    done
+    for pid in "$ORACLE_PID" "$WEBSOCKIFY_PID" "$X11VNC_PID" "$XVFB_PID"; do
+        if [ -n "$pid" ]; then
+            wait "$pid" 2>/dev/null || true
+        fi
+    done
     exit 0
 }
 trap cleanup SIGTERM SIGINT
 
+echo "Starting Xvfb on display ${DISPLAY}..."
+Xvfb "${DISPLAY}" -screen 0 "${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}x24" -ac +extension GLX +render -noreset &
+XVFB_PID=$!
+
+sleep 1
+
+x11vnc -display "${DISPLAY}" -forever -shared -nopw -rfbport 5900 -o /tmp/x11vnc.log &
+X11VNC_PID=$!
+echo "x11vnc started (pid ${X11VNC_PID})"
+
+websockify --web /usr/share/novnc 7900 localhost:5900 &
+WEBSOCKIFY_PID=$!
+echo "noVNC websocket proxy started on port 7900 (pid ${WEBSOCKIFY_PID})"
+
+start_oracle() {
+    local cmd=(oracle serve --host "${ORACLE_SERVE_HOST}" --port "${ORACLE_SERVE_PORT}")
+
+    if [ "${ORACLE_BROWSER_MANUAL_LOGIN:-1}" = "1" ] || [ "${ORACLE_BROWSER_MANUAL_LOGIN:-}" = "true" ]; then
+        cmd+=(--manual-login --manual-login-profile-dir "${ORACLE_BROWSER_PROFILE_DIR}")
+    fi
+
+    if [ -n "${ORACLE_SERVE_TOKEN:-}" ]; then
+        cmd+=(--token "${ORACLE_SERVE_TOKEN}")
+    fi
+
+    echo "Starting oracle serve on ${ORACLE_SERVE_HOST}:${ORACLE_SERVE_PORT}..."
+    "${cmd[@]}" &
+    ORACLE_PID=$!
+}
+
 start_oracle
 
-while kill -0 "$SELENIUM_PID" 2>/dev/null; do
+while true; do
+    for pid in "$XVFB_PID" "$X11VNC_PID" "$WEBSOCKIFY_PID"; do
+        if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+            echo "Required process ${pid} exited unexpectedly; shutting down."
+            cleanup
+        fi
+    done
+
     if ! kill -0 "$ORACLE_PID" 2>/dev/null; then
         echo "oracle serve exited; retrying in ${ORACLE_SERVE_RETRY_DELAY}s"
         sleep "${ORACLE_SERVE_RETRY_DELAY}"
-        if ! kill -0 "$SELENIUM_PID" 2>/dev/null; then
-            break
-        fi
         start_oracle
     fi
+
     sleep 1
 done
-
-wait "$SELENIUM_PID"
-EXIT_CODE=$?
-
-if [ -n "${ORACLE_PID}" ]; then
-    kill -TERM "$ORACLE_PID" 2>/dev/null || true
-    wait "$ORACLE_PID" 2>/dev/null || true
-fi
-
-exit "$EXIT_CODE"

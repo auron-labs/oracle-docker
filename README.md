@@ -1,15 +1,14 @@
 # Oracle Docker
 
-Docker image for running [`oracle serve`](https://github.com/steipete/oracle) with a built-in Chrome browser, Selenium, and noVNC.
+Docker image for running [`oracle serve`](https://github.com/steipete/oracle) with a built-in Chromium browser and noVNC.
 
 This image is meant for remote browser mode: you run the container on a machine with Docker, sign into ChatGPT once inside the container's browser, and then point Oracle clients at the container with `--remote-host`.
 
 ## What It Includes
 
-- `selenium/standalone-chrome` as the base image
-- Chrome, VNC, and noVNC for interactive browser login
+- Alpine Linux base with Chromium, Xvfb, x11vnc, VNC, and noVNC
 - `@steipete/oracle` installed from npm at build time
-- `oracle serve` started automatically alongside the browser stack
+- `oracle serve` started automatically alongside the GUI/VNC stack
 
 ## Quick Start
 
@@ -25,18 +24,17 @@ Run it with a persistent Oracle data volume and a token for remote access:
 docker run --rm -it \
   -p 9473:9473 \
   -p 7900:7900 \
-  -p 4444:4444 \
   --shm-size=2g \
   -e ORACLE_SERVE_TOKEN=test-token \
-  -v oracle-data:/home/seluser/.oracle \
+  -v oracle-data:/home/app/.oracle \
   --name oracle \
   ghcr.io/auron-labs/oracle-docker:latest
 ```
 
 Then:
 
-1. Open `http://localhost:7900/?autoconnect=1&resize=scale`
-2. Sign into ChatGPT in the Chrome window inside the container
+1. Open `http://localhost:7900/vnc.html?autoconnect=1&resize=scale`
+2. Sign into ChatGPT in the Chromium window inside the container
 3. Wait a few seconds for `oracle serve` to retry, or restart the container once
 4. From another terminal, connect to the container with Oracle
 
@@ -51,16 +49,14 @@ npx -y @steipete/oracle --engine browser \
 
 ## First-Run Login Flow
 
-On a fresh container there are no ChatGPT cookies yet. `oracle serve` will try to start, notice that login is required, open ChatGPT in the container browser, then exit.
+On a fresh container there are no ChatGPT cookies yet. `oracle serve` launches Chromium (via a `--no-sandbox` wrapper required for container environments) and opens ChatGPT. Because no session exists, login is required and `oracle serve` exits.
 
-That is expected.
+That is expected. The entrypoint retries `oracle serve` automatically every 5 seconds.
 
-The container keeps Selenium, Chrome, VNC, and noVNC running so you can complete login. After login:
+The container keeps Xvfb, x11vnc, and noVNC running so you can complete login through the VNC session. After login, the next automatic retry picks up the active session and remote Oracle clients can connect.
 
-- wait for the next automatic `oracle serve` retry, or
-- restart the container once
-
-Persist `/home/seluser/.oracle` so the login session survives future container restarts.
+Persist `/home/app/.oracle` so the login session survives future container restarts.
+This image passes `--manual-login --manual-login-profile-dir /home/app/.oracle/browser-profile` explicitly to `oracle serve` so first-run login and later remote runs use the same Chromium profile directory.
 
 ## Test Run
 
@@ -76,10 +72,9 @@ Run locally:
 docker run --rm -it \
   -p 9473:9473 \
   -p 7900:7900 \
-  -p 4444:4444 \
   --shm-size=2g \
   -e ORACLE_SERVE_TOKEN=test-token \
-  -v oracle-data:/home/seluser/.oracle \
+  -v oracle-data:/home/app/.oracle \
   --name oracle-test \
   oracle-docker:test
 ```
@@ -92,16 +87,17 @@ docker logs -f oracle-test
 
 Healthy first-run behavior looks like this:
 
-- noVNC stays available at `http://localhost:7900`
-- logs may show `oracle serve exited; retrying in 5s`
-- after ChatGPT login, a retry succeeds and remote Oracle clients can connect
+- noVNC stays available at `http://localhost:7900/vnc.html`
+- raw VNC stays available on port `5900`
+- a Chromium window opens in VNC showing the ChatGPT login page
+- logs show `oracle serve exited; retrying in 5s`
+- after you complete ChatGPT login in VNC, the next retry succeeds and remote Oracle clients can connect
 
 ## Ports
 
 | Port | Purpose |
 |---|---|
 | `9473` | `oracle serve` remote host |
-| `4444` | Selenium Grid |
 | `7900` | noVNC web UI |
 | `5900` | Raw VNC |
 
@@ -111,19 +107,19 @@ Healthy first-run behavior looks like this:
 
 | Variable | Default | Description |
 |---|---|---|
-| `ORACLE_HOME_DIR` | `/home/seluser/.oracle` | Oracle config, sessions, and browser state |
+| `ORACLE_HOME_DIR` | `/home/app/.oracle` | Oracle config, sessions, and browser state |
+| `HOME` | `/home/app` | Home directory used by Oracle and Chromium path resolution |
 | `ORACLE_SERVE_HOST` | `0.0.0.0` | Bind host for `oracle serve` |
 | `ORACLE_SERVE_PORT` | `9473` | Bind port for `oracle serve` |
 | `ORACLE_SERVE_TOKEN` | empty | Optional token required by remote clients |
 | `ORACLE_SERVE_RETRY_DELAY` | `5` | Seconds to wait before retrying `oracle serve` after exit |
 | `ORACLE_ENGINE` | `browser` | Default Oracle engine inside the container |
 | `ORACLE_BROWSER_MANUAL_LOGIN` | `1` | Use Oracle's persistent manual-login browser profile instead of cookie copy |
-| `ORACLE_BROWSER_CHROME_PATH` | `/usr/bin/google-chrome` | Chrome path used by Oracle |
-| `SE_NODE_MAX_SESSIONS` | `3` | Maximum concurrent Selenium sessions |
-| `SE_NODE_SESSION_TIMEOUT` | `300` | Selenium session timeout in seconds |
-| `SE_VNC_NO_PASSWORD` | `1` | Disable VNC password on the container's VNC server |
-| `SE_SCREEN_WIDTH` | `1920` | Virtual display width |
-| `SE_SCREEN_HEIGHT` | `1080` | Virtual display height |
+| `ORACLE_BROWSER_PROFILE_DIR` | `/home/app/.oracle/browser-profile` | Persistent Chromium profile used by Oracle manual-login mode |
+| `ORACLE_BROWSER_CHROME_PATH` | `/usr/local/bin/chromium-no-sandbox` | Chromium wrapper with `--no-sandbox` for container use |
+| `DISPLAY` | `:99` | X11 display used by Xvfb |
+| `DISPLAY_WIDTH` | `1920` | Virtual display width |
+| `DISPLAY_HEIGHT` | `1080` | Virtual display height |
 
 You can also pass any other Oracle-supported environment variables, including API keys when using API mode.
 
@@ -131,7 +127,7 @@ You can also pass any other Oracle-supported environment variables, including AP
 
 - Set `ORACLE_SERVE_TOKEN` for any non-local use.
 - Do not expose port `9473` publicly without authentication and network controls.
-- Persist `/home/seluser/.oracle` carefully because it contains Oracle session data and browser state.
+- Persist `/home/app/.oracle` carefully because it contains Oracle session data and browser state.
 
 ## Troubleshooting
 
@@ -143,7 +139,7 @@ Check the container logs:
 docker logs -f oracle-test
 ```
 
-If login is required, you should still be able to open noVNC and sign in. If the browser stack also exits, rebuild from the latest repo state.
+If login is required, you should still be able to open noVNC and sign in. If the Xvfb or VNC stack also exits, rebuild from the latest repo state.
 
 ### noVNC works but remote Oracle clients cannot connect
 
@@ -153,7 +149,7 @@ If login is required, you should still be able to open noVNC and sign in. If the
 
 ### ChatGPT login does not persist
 
-Make sure `/home/seluser/.oracle` is mounted to a persistent Docker volume.
+Make sure `/home/app/.oracle` is mounted to a persistent Docker volume.
 
 ## License
 

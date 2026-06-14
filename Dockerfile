@@ -1,50 +1,59 @@
-FROM selenium/standalone-chrome:latest
+FROM node:24-alpine3.21
 
 ARG ORACLE_VERSION=latest
 
-USER root
+RUN printf '%s\n' \
+    'https://mirrors.edge.kernel.org/alpine/v3.21/main' \
+    'https://mirrors.edge.kernel.org/alpine/v3.21/community' \
+    > /etc/apk/repositories
 
-# Install Node.js 24.x
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates curl gnupg && \
-    mkdir -p /etc/apt/keyrings && \
-    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
-    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" > /etc/apt/sources.list.d/nodesource.list && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends nodejs && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache \
+    chromium \
+    xvfb \
+    x11vnc \
+    novnc \
+    websockify \
+    dbus \
+    nss \
+    freetype \
+    harfbuzz \
+    ttf-freefont \
+    font-noto-emoji \
+    ca-certificates \
+    bash \
+    procps \
+    jq
 
-# Install Oracle
+RUN printf '#!/bin/sh\nexec /usr/bin/chromium-browser --no-sandbox --disable-gpu --disable-dev-shm-usage "$@"\n' \
+    > /usr/local/bin/chromium-no-sandbox && chmod +x /usr/local/bin/chromium-no-sandbox
+
 RUN npm install -g @steipete/oracle@${ORACLE_VERSION}
 
-# Copy entrypoint
-COPY docker-entrypoint.sh /opt/bin/docker-entrypoint.sh
-RUN chmod +x /opt/bin/docker-entrypoint.sh
+RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
+RUN adduser -D -h /home/app -s /bin/bash app
 
-# Oracle serve port
+COPY docker-entrypoint.sh /opt/docker-entrypoint.sh
+RUN chmod +x /opt/docker-entrypoint.sh
+
 EXPOSE 9473
-
-# Selenium Grid, noVNC, VNC ports (from base image)
-EXPOSE 4444
 EXPOSE 7900
 EXPOSE 5900
 
-# Sane defaults for container use
-ENV ORACLE_HOME_DIR=/home/seluser/.oracle
+ENV HOME=/home/app
+ENV ORACLE_HOME_DIR=/home/app/.oracle
 ENV ORACLE_SERVE_HOST=0.0.0.0
 ENV ORACLE_SERVE_PORT=9473
 ENV ORACLE_SERVE_TOKEN=
 ENV ORACLE_SERVE_RETRY_DELAY=5
 ENV ORACLE_ENGINE=browser
 ENV ORACLE_BROWSER_MANUAL_LOGIN=1
-ENV ORACLE_BROWSER_CHROME_PATH=/usr/bin/google-chrome
-ENV SE_NODE_MAX_SESSIONS=3
-ENV SE_NODE_SESSION_TIMEOUT=300
-ENV SE_VNC_NO_PASSWORD=1
-ENV SE_SCREEN_WIDTH=1920
-ENV SE_SCREEN_HEIGHT=1080
+ENV CHROME_PATH=/usr/local/bin/chromium-no-sandbox
+ENV ORACLE_BROWSER_PROFILE_DIR=/home/app/.oracle/browser-profile
+ENV ORACLE_BROWSER_CHROME_PATH=/usr/local/bin/chromium-no-sandbox
+ENV DISPLAY=:99
+ENV DISPLAY_WIDTH=1920
+ENV DISPLAY_HEIGHT=1080
 
-USER seluser
+USER app
 
-ENTRYPOINT ["/opt/bin/docker-entrypoint.sh"]
+ENTRYPOINT ["/opt/docker-entrypoint.sh"]

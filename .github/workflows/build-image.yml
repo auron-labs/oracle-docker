@@ -51,6 +51,36 @@ jobs:
             type=raw,value=${{ steps.version.outputs.oracle_version }}
             type=raw,value=latest
 
+      - name: Build smoke image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: oracle-docker:smoke
+          build-args: |
+            ORACLE_VERSION=${{ steps.version.outputs.oracle_version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test container startup
+        run: |
+          docker run -d --name oracle-smoke \
+            -p 9473:9473 -p 7900:7900 \
+            --shm-size=2g \
+            oracle-docker:smoke
+          trap 'echo "--- container logs ---"; docker logs oracle-smoke 2>&1 | tail -80; docker rm -f oracle-smoke' EXIT
+          sleep 15
+          docker logs oracle-smoke
+          docker exec oracle-smoke oracle serve --help | grep -q -- '--manual-login-profile-dir'
+          curl -fsS http://127.0.0.1:7900/vnc.html >/dev/null
+          docker exec oracle-smoke pgrep -x Xvfb
+          docker exec oracle-smoke pgrep -x x11vnc
+          docker exec oracle-smoke test -x /usr/local/bin/chromium-no-sandbox
+          docker exec oracle-smoke chromium-no-sandbox --version
+          docker exec oracle-smoke bash -c \
+            'pgrep -af chromium || pgrep -af chrome || test -f /home/app/.oracle/browser-profile/DevToolsActivePort' \
+            || { echo "No running Chromium or DevToolsActivePort found"; exit 1; }
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
