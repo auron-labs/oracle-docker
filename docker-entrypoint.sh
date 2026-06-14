@@ -1,7 +1,18 @@
 #!/bin/bash
 set -euo pipefail
 
+APP_USER=${APP_USER:-app}
+APP_GROUP=${APP_GROUP:-app}
+
+run_as_app() {
+    su-exec "${APP_USER}:${APP_GROUP}" "$@"
+}
+
 mkdir -p "${ORACLE_HOME_DIR}"
+
+if [ "$(id -u)" -eq 0 ]; then
+    chown -R "${APP_USER}:${APP_GROUP}" "${ORACLE_HOME_DIR}"
+fi
 
 XVFB_PID=""
 X11VNC_PID=""
@@ -25,16 +36,16 @@ cleanup() {
 trap cleanup SIGTERM SIGINT
 
 echo "Starting Xvfb on display ${DISPLAY}..."
-Xvfb "${DISPLAY}" -screen 0 "${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}x24" -ac +extension GLX +render -noreset &
+run_as_app Xvfb "${DISPLAY}" -screen 0 "${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}x24" -ac +extension GLX +render -noreset &
 XVFB_PID=$!
 
 sleep 1
 
-x11vnc -display "${DISPLAY}" -forever -shared -nopw -rfbport 5900 -o /tmp/x11vnc.log &
+run_as_app x11vnc -display "${DISPLAY}" -forever -shared -nopw -rfbport 5900 -o /tmp/x11vnc.log &
 X11VNC_PID=$!
 echo "x11vnc started (pid ${X11VNC_PID})"
 
-websockify --web /usr/share/novnc 7900 localhost:5900 &
+run_as_app websockify --web /usr/share/novnc 7900 localhost:5900 &
 WEBSOCKIFY_PID=$!
 echo "noVNC websocket proxy started on port 7900 (pid ${WEBSOCKIFY_PID})"
 
@@ -50,7 +61,7 @@ start_oracle() {
     fi
 
     echo "Starting oracle serve on ${ORACLE_SERVE_HOST}:${ORACLE_SERVE_PORT}..."
-    "${cmd[@]}" &
+    run_as_app "${cmd[@]}" &
     ORACLE_PID=$!
 }
 

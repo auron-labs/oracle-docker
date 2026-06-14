@@ -47,6 +47,24 @@ npx -y @steipete/oracle --engine browser \
   -p "Reply with OK"
 ```
 
+Or put the remote defaults in `~/.oracle/config.json` so you do not need to repeat the flags each time:
+
+```json
+{
+  "engine": "browser",
+  "browser": {
+    "remoteHost": "localhost:9473",
+    "remoteToken": "test-token"
+  }
+}
+```
+
+Then you can run Oracle with just:
+
+```bash
+npx -y @steipete/oracle -p "Reply with OK"
+```
+
 ## First-Run Login Flow
 
 On a fresh container there are no ChatGPT cookies yet. `oracle serve` launches Chromium (via a `--no-sandbox` wrapper required for container environments) and opens ChatGPT. Because no session exists, login is required and `oracle serve` exits.
@@ -150,6 +168,10 @@ If login is required, you should still be able to open noVNC and sign in. If the
 ### ChatGPT login does not persist
 
 Make sure `/home/app/.oracle` is mounted to a persistent Docker volume.
+
+### Bind-mounted folder shows permission denied
+
+The container starts as root, fixes ownership on `ORACLE_HOME_DIR`, then runs Oracle and the GUI stack as the `app` user. If you bind-mount a host folder, point it at `/home/app/.oracle` so the entrypoint can prepare `/home/app/.oracle/browser-profile` before Oracle starts.
 
 ## License
 

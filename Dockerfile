@@ -22,7 +22,8 @@ RUN apk add --no-cache \
     ca-certificates \
     bash \
     procps \
-    jq
+    jq \
+    su-exec
 
 RUN printf '#!/bin/sh\nexec /usr/bin/chromium-browser --no-sandbox --disable-gpu --disable-dev-shm-usage "$@"\n' \
     > /usr/local/bin/chromium-no-sandbox && chmod +x /usr/local/bin/chromium-no-sandbox
@@ -53,7 +54,5 @@ ENV ORACLE_BROWSER_CHROME_PATH=/usr/local/bin/chromium-no-sandbox
 ENV DISPLAY=:99
 ENV DISPLAY_WIDTH=1920
 ENV DISPLAY_HEIGHT=1080
-
-USER app
 
 ENTRYPOINT ["/opt/docker-entrypoint.sh"]
